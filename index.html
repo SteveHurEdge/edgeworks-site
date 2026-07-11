@@ -1065,12 +1065,18 @@ document.getElementById('hero').addEventListener('mouseleave', () => {
   mouseX = -1000; mouseY = -1000;
 });
 
-// ── NETWORK ANIMATION ──
+// ── NETWORK ANIMATION v2: parallax, ripples, scroll fade, perf guard ──
 const canvas = document.getElementById('circuit');
 const ctx = canvas.getContext('2d');
+const heroEl = document.getElementById('hero');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-let W, H, DPR, nodes = [], pulses = [];
+let W, H, DPR, nodes = [], bgNodes = [], pulses = [], ripples = [];
 const LINK_DIST = 170;
+const PULSE_COLORS = [
+  { glow: '0,87,255',  core: '191,219,254' },   // blue
+  { glow: '34,211,238', core: '207,250,254' },  // cyan
+  { glow: '148,163,184', core: '255,255,255' }  // white
+];
 
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -1081,113 +1087,182 @@ function resize() {
 
 function initNodes() {
   const count = W < 700 ? 36 : 78;
-  nodes = [];
+  const bgCount = W < 700 ? 22 : 45;
+  nodes = []; bgNodes = []; pulses = []; ripples = [];
   for (let i = 0; i < count; i++) {
     nodes.push({
       x: Math.random() * W, y: Math.random() * H,
-      vx: (Math.random() - 0.5) * 0.35,
-      vy: (Math.random() - 0.5) * 0.35,
+      vx: (Math.random() - 0.5) * 0.35, vy: (Math.random() - 0.5) * 0.35,
       r: 1.2 + Math.random() * 1.8
     });
   }
-  pulses = [];
+  for (let i = 0; i < bgCount; i++) {
+    bgNodes.push({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - 0.5) * 0.15, vy: (Math.random() - 0.5) * 0.15,
+      r: 0.6 + Math.random() * 1.0
+    });
+  }
 }
 
-function spawnPulse() {
-  // pick a random connected pair and send a bright data pulse along it
+function spawnPulse(fromX, fromY) {
   for (let attempt = 0; attempt < 12; attempt++) {
-    const a = nodes[(Math.random() * nodes.length) | 0];
+    const a = fromX == null ? nodes[(Math.random() * nodes.length) | 0] : nearestNode(fromX, fromY, attempt);
     const b = nodes[(Math.random() * nodes.length) | 0];
-    if (a === b) continue;
+    if (!a || a === b) continue;
     const dx = a.x - b.x, dy = a.y - b.y;
     if (dx*dx + dy*dy < LINK_DIST * LINK_DIST * 0.8) {
-      pulses.push({ a, b, t: 0, speed: 0.012 + Math.random() * 0.014 });
+      pulses.push({ a, b, t: 0, speed: 0.012 + Math.random() * 0.014,
+                    c: PULSE_COLORS[(Math.random() * PULSE_COLORS.length) | 0] });
       return;
     }
   }
 }
 
-function drawFrame(animate) {
-  ctx.clearRect(0, 0, W, H);
+function nearestNode(x, y, skip) {
+  let best = null, bestD = Infinity;
+  nodes.forEach(n => {
+    const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+    if (d < bestD) { bestD = d; best = n; }
+  });
+  return best;
+}
 
-  if (animate) {
-    nodes.forEach(n => {
-      n.x += n.vx; n.y += n.vy;
-      if (n.x < 0) n.x = W; if (n.x > W) n.x = 0;
-      if (n.y < 0) n.y = H; if (n.y > H) n.y = 0;
-    });
-  }
+// scroll-linked fade & shift
+let scrollFade = 1, scrollShift = 0;
+function updateScrollLink() {
+  const sy = window.scrollY;
+  const hh = heroEl ? heroEl.offsetHeight : H;
+  scrollFade = Math.max(0, 1 - sy / (hh * 0.85));
+  scrollShift = sy * 0.28;
+}
 
-  // links between nearby nodes
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      const a = nodes[i], b = nodes[j];
-      const dx = a.x - b.x, dy = a.y - b.y;
-      const d2 = dx*dx + dy*dy;
-      if (d2 > LINK_DIST * LINK_DIST) continue;
-      const d = Math.sqrt(d2);
-      let alpha = (1 - d / LINK_DIST) * 0.45;
-      // brighten links near the cursor
-      const mx = (a.x + b.x) / 2 - mouseX, my = (a.y + b.y) / 2 - mouseY;
-      const md = Math.sqrt(mx*mx + my*my);
-      if (md < 200) alpha += (1 - md / 200) * 0.35;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = `rgba(59,130,246,${alpha})`;
-      ctx.lineWidth = 1;
-      ctx.stroke();
+function drawLayer(layer, parallax, linkAlphaBase, nodeAlphaBase, links) {
+  const px = (mouseX > -500 ? (mouseX - W / 2) : 0) * parallax;
+  const py = (mouseY > -500 ? (mouseY - H / 2) : 0) * parallax - scrollShift * parallax * 12;
+  ctx.save();
+  ctx.translate(px, py);
+  if (links) {
+    for (let i = 0; i < layer.length; i++) {
+      for (let j = i + 1; j < layer.length; j++) {
+        const a = layer[i], b = layer[j];
+        const dx = a.x - b.x, dy = a.y - b.y;
+        const d2 = dx*dx + dy*dy;
+        if (d2 > LINK_DIST * LINK_DIST) continue;
+        const d = Math.sqrt(d2);
+        let alpha = (1 - d / LINK_DIST) * linkAlphaBase;
+        const mx = (a.x + b.x) / 2 - mouseX, my = (a.y + b.y) / 2 - mouseY;
+        const md = Math.sqrt(mx*mx + my*my);
+        if (md < 200) alpha += (1 - md / 200) * 0.35;
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = `rgba(59,130,246,${alpha})`;
+        ctx.lineWidth = 1; ctx.stroke();
+      }
     }
   }
-
-  // nodes
-  nodes.forEach(n => {
+  layer.forEach(n => {
     const dx = n.x - mouseX, dy = n.y - mouseY;
     const dist = Math.sqrt(dx*dx + dy*dy);
     const boost = dist < 160 ? (1 - dist / 160) : 0;
     ctx.beginPath();
     ctx.arc(n.x, n.y, n.r * (1 + boost * 0.8), 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(96,165,250,${0.65 + boost * 0.35})`;
+    ctx.fillStyle = `rgba(96,165,250,${nodeAlphaBase + boost * 0.35})`;
     ctx.fill();
   });
+  ctx.restore();
+}
 
-  // data pulses traveling along links
+function drawFrame(animate) {
+  ctx.clearRect(0, 0, W, H);
+  if (scrollFade <= 0.01) return;
+  ctx.globalAlpha = scrollFade;
+
+  if (animate) {
+    [bgNodes, nodes].forEach(layer => layer.forEach(n => {
+      n.x += n.vx; n.y += n.vy;
+      if (n.x < 0) n.x = W; if (n.x > W) n.x = 0;
+      if (n.y < 0) n.y = H; if (n.y > H) n.y = 0;
+    }));
+  }
+
+  // back layer: dimmer, slower parallax, no links
+  drawLayer(bgNodes, 0.012, 0, 0.3, false);
+  // front layer: full network
+  drawLayer(nodes, 0.03, 0.45, 0.65, true);
+
+  // pulses (front layer space)
   if (animate) {
     if (pulses.length < 12 && Math.random() < 0.1) spawnPulse();
+    const px = (mouseX > -500 ? (mouseX - W / 2) : 0) * 0.03;
+    const py = (mouseY > -500 ? (mouseY - H / 2) : 0) * 0.03 - scrollShift * 0.36;
+    ctx.save(); ctx.translate(px, py);
     for (let i = pulses.length - 1; i >= 0; i--) {
       const p = pulses[i];
       p.t += p.speed;
       if (p.t >= 1) { pulses.splice(i, 1); continue; }
       const x = p.a.x + (p.b.x - p.a.x) * p.t;
       const y = p.a.y + (p.b.y - p.a.y) * p.t;
-      const fade = Math.sin(p.t * Math.PI); // ease in-out brightness
-      // glow
-      ctx.beginPath();
-      ctx.arc(x, y, 7, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(0,87,255,${0.4 * fade})`;
-      ctx.fill();
-      // core
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(191,219,254,${0.95 * fade})`;
-      ctx.fill();
+      const fade = Math.sin(p.t * Math.PI);
+      ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${p.c.glow},${0.4 * fade})`; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${p.c.core},${0.95 * fade})`; ctx.fill();
     }
+    // ripples
+    for (let i = ripples.length - 1; i >= 0; i--) {
+      const rp = ripples[i];
+      rp.r += rp.speed; rp.alpha *= 0.955;
+      if (rp.alpha < 0.015) { ripples.splice(i, 1); continue; }
+      ctx.beginPath(); ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(96,165,250,${rp.alpha})`;
+      ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    ctx.restore();
   }
+  ctx.globalAlpha = 1;
 }
 
+// click / tap ripple burst
+if (heroEl && !reduceMotion) {
+  heroEl.addEventListener('pointerdown', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
+    ripples.push({ x, y, r: 4, speed: 3.2, alpha: 0.55 });
+    ripples.push({ x, y, r: 4, speed: 2.1, alpha: 0.35 });
+    for (let k = 0; k < 4; k++) spawnPulse(x, y);
+  });
+}
+
+// performance guard: pause when tab hidden or hero off-screen
+let running = false, heroVisible = true, tabVisible = !document.hidden;
 function loop() {
+  if (!running) return;
   drawFrame(true);
   requestAnimationFrame(loop);
 }
+function updateRunning() {
+  const should = heroVisible && tabVisible && !reduceMotion;
+  if (should && !running) { running = true; requestAnimationFrame(loop); }
+  else if (!should) { running = false; }
+}
+document.addEventListener('visibilitychange', () => { tabVisible = !document.hidden; updateRunning(); });
+if ('IntersectionObserver' in window && heroEl) {
+  new IntersectionObserver((entries) => {
+    heroVisible = entries[0].isIntersecting;
+    updateRunning();
+  }, { threshold: 0 }).observe(heroEl);
+}
+window.addEventListener('scroll', updateScrollLink, { passive: true });
 
 resize();
 initNodes();
+updateScrollLink();
 if (reduceMotion) {
-  drawFrame(false); // static network, no motion
+  drawFrame(false);
 } else {
-  loop();
+  updateRunning();
 }
-window.addEventListener('resize', () => { resize(); initNodes(); if (reduceMotion) drawFrame(false); });
+window.addEventListener('resize', () => { resize(); initNodes(); updateScrollLink(); if (reduceMotion) drawFrame(false); });
 </script>
 </body>
 </html>
