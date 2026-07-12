@@ -402,7 +402,23 @@
     box-shadow: 0 1px 3px rgba(10,15,30,0.05);
   }
   #vendors .vendor-card:hover { border-color: rgba(0,87,255,0.35); }
-  #vendors .vendor-logo-wrap { background: #FFFFFF; }
+  #vendors .vendor-logo-wrap { background: #FFFFFF; height: 112px; padding: 18px 24px; }
+  #vendors .vendor-logo-img { max-height: 72px; }
+  #vendors .logo-vertiv    { max-width: 190px; }
+  #vendors .logo-rittal    { max-width: 84px; }
+  #vendors .logo-apc       { max-width: 175px; }
+  #vendors .logo-eaton     { max-width: 190px; }
+  #vendors .logo-schneider { max-width: 200px; }
+  #vendors .logo-panduit   { max-width: 195px; }
+  #vendors .vendor-card { padding-bottom: 20px; }
+  #vendors .vendor-cat { font-size: 12px; }
+  @media (max-width: 700px) {
+    #vendors .vendor-logo-wrap { height: 84px; padding: 12px 16px; }
+    #vendors .vendor-logo-img { max-height: 52px; }
+    #vendors .logo-vertiv, #vendors .logo-eaton, #vendors .logo-schneider, #vendors .logo-panduit { max-width: 140px; }
+    #vendors .logo-apc { max-width: 130px; }
+    #vendors .logo-rittal { max-width: 62px; }
+  }
   #vendors .vendor-cat { color: #4A5A78; }
   #vendors .vendor-logo-fallback { color: #0A0F1E; }
   #vendors p[style*="border-left"] { border-left-color: #0057FF !important; background: rgba(0,87,255,0.05); }
